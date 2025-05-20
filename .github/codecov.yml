@@ -1,5 +1,0 @@
-# To validate this file on changes before committing, see https://api.codecov.io/validate
-
-codecov:
-  notify:
-    after_n_builds: 2

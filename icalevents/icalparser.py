@@ -5,7 +5,6 @@ Parse iCal data to Events.
 from datetime import datetime, timedelta, date
 from importlib.metadata import version
 from random import randint
-from typing import Optional
 from uuid import uuid4
 
 from dateutil.rrule import rrulestr
@@ -13,6 +12,8 @@ from dateutil.tz import UTC, gettz
 from icalendar import Calendar
 from icalendar.prop import vDDDLists, vText
 from pytz import timezone
+
+from icalevents.encoding import get_encoding
 
 if version("icalendar") >= "6.0":
     from icalendar import use_pytz
@@ -37,7 +38,8 @@ class Attendee(str):
         self.address = address
 
     def __repr__(self):
-        return self.address.encode("utf-8").decode("ascii")
+        encoding = get_encoding()
+        return self.address.encode(encoding.ENCODE_ENCODING).decode(encoding.DECODE_ENCODING)
 
     @property
     def params(self):
@@ -49,10 +51,11 @@ class Event:
     Represents one event (occurrence in case of reoccurring events).
     """
 
-    def __init__(self):
+    def __init__(self, raw_event=None):
         """
         Create a new event occurrence.
         """
+        self.raw_event = raw_event
         self.uid = -1
         self.summary = None
         self.description = None
@@ -135,7 +138,7 @@ class Event:
         if not uid:
             uid = "%s_%d" % (self.uid, randint(0, 1000000))
 
-        ne = Event()
+        ne = Event(raw_event=self.raw_event)
         ne.summary = self.summary
         ne.description = self.description
         ne.start = new_start
@@ -162,13 +165,11 @@ class Event:
         return ne
 
 
-def encode(value: Optional[vText]) -> Optional[str]:
+def encode_decode(value: vText | None) -> str | None:
     if value is None:
         return None
-    try:
-        return str(value)
-    except UnicodeEncodeError:
-        return str(value.encode("utf-8"))
+    encoding = get_encoding()
+    return value.encode(encoding.ENCODE_ENCODING).decode(encoding.DECODE_ENCODING)
 
 
 def create_event(component, strict):
@@ -180,20 +181,20 @@ def create_event(component, strict):
     :return: event
     """
 
-    event = Event()
+    event = Event(raw_event=component)
 
     event.start = component.get("dtstart").dt
     # The RFC specifies that the TZID parameter must be specified for datetime or time
     # Otherwise we set a default timezone (if only one is set with VTIMEZONE) or utc
     if not strict:
         event.floating = (
-            type(component.get("dtstart").dt) == date
-            or component.get("dtstart").dt.tzinfo is None
+                type(component.get("dtstart").dt) == date
+                or component.get("dtstart").dt.tzinfo is None
         )
     else:
         event.floating = (
-            type(component.get("dtstart").dt) == datetime
-            and component.get("dtstart").dt.tzinfo is None
+                type(component.get("dtstart").dt) == datetime
+                and component.get("dtstart").dt.tzinfo is None
         )
 
     if component.get("dtend"):
@@ -203,12 +204,12 @@ def create_event(component, strict):
     else:  # compute implicit end as start + 0
         event.end = event.start
 
-    event.summary = encode(component.get("summary"))
-    event.description = encode(component.get("description"))
+    event.summary = encode_decode(component.get("summary"))
+    event.description = encode_decode(component.get("description"))
     event.all_day = type(component.get("dtstart").dt) is date
     if component.get("rrule"):
         event.recurring = True
-    event.location = encode(component.get("location"))
+    event.location = encode_decode(component.get("location"))
 
     if component.get("attendee"):
         event.attendee = component.get("attendee")
@@ -219,13 +220,14 @@ def create_event(component, strict):
     else:
         event.attendee = str(None)
 
+    encoding = get_encoding()
     try:
-        event.uid = component.get("uid").encode("utf-8").decode("ascii")
+        event.uid = component.get("uid").encode(encoding.ENCODE_ENCODING).decode(encoding.DECODE_ENCODING)
     except (AttributeError, UnicodeDecodeError):
         event.uid = str(uuid4())  # Be nice - treat every event as unique
 
     if component.get("organizer"):
-        event.organizer = component.get("organizer").encode("utf-8").decode("ascii")
+        event.organizer = component.get("organizer").encode(encoding.ENCODE_ENCODING).decode(encoding.DECODE_ENCODING)
     else:
         event.organizer = str(None)
 
@@ -261,26 +263,26 @@ def create_event(component, strict):
         categories = component.get("categories").cats
         encoded_categories = list()
         for category in categories:
-            encoded_categories.append(encode(category))
+            encoded_categories.append(encode_decode(category))
         event.categories = encoded_categories
 
     if component.get("status"):
-        event.status = encode(component.get("status"))
+        event.status = encode_decode(component.get("status"))
 
     if component.get("url"):
-        event.url = encode(component.get("url"))
+        event.url = encode_decode(component.get("url"))
 
     return event
 
 
 def parse_events(
-    content,
-    start=None,
-    end=None,
-    default_span=timedelta(days=7),
-    tzinfo=None,
-    sort=False,
-    strict=False,
+        content,
+        start=None,
+        end=None,
+        default_span=timedelta(days=7),
+        tzinfo=None,
+        sort=False,
+        strict=False,
 ):
     """
     Query the events occurring in a given time range.
@@ -440,8 +442,8 @@ def parse_events(
     # Remove events that are replaced in ical
     for event in found:
         if not event.recurrence_id and (
-            event.uid,
-            event.start,
+                event.uid,
+                event.start,
         ) in [(f.uid, f.recurrence_id) for f in found]:
             result.remove(event)
 
