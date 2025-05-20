@@ -4,7 +4,6 @@ calendars.txt
 *__pycache__*
 .idea/
 .coverage
-dist/*
 MANIFEST
 icalevents.egg-info/*
 /build
